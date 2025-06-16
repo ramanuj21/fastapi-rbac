@@ -1,21 +1,23 @@
-# Dockerfile
+# # Dockerfile
+
 FROM python:3.12-slim
 
-# Install dependencies
-RUN apt-get update && apt-get install -y build-essential
-
-# Set workdir
 WORKDIR /app
 
-# Copy project files
-COPY . /app
+# Install poetry
+RUN pip install poetry
 
-# Install project + dev deps (if pyproject.toml has them)
-RUN pip install --upgrade pip \
-  && pip install pytest
+# Copy and install dependencies
+COPY pyproject.toml poetry.lock* ./
+RUN poetry config virtualenvs.create false && poetry install --no-root
 
-# Install your package in editable mode
-RUN pip install -e .
+COPY rbac ./rbac
+COPY tests ./tests
 
-# Run tests by default
-CMD ["pytest", "tests"]
+WORKDIR /app
+
+# Expose FastAPI port
+EXPOSE 8000
+
+# Default command: run FastAPI app
+CMD ["uvicorn", "rbac.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
