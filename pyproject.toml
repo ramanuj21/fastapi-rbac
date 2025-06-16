@@ -4,7 +4,32 @@ version = "0.1.0"
 description = "Modern, pluggable RBAC library for FastAPI and multi-tenant SaaS"
 authors = [{ name = "Ramanuj P", email = "ramanuj.p7@gmail.com" }]
 license = "MIT"
-dependencies = []
+dependencies = ["fastapi", "uvicorn", "httpx==0.27.0"]
+
+[project.optional-dependencies]
+dev = ["pytest", "pytest-asyncio"]
 
 [tool.setuptools]
 packages = ["rbac"]
+
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.0"
+pytest-asyncio = "^0.23.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+
+[tool.poetry.dependencies]
+python = "^3.12"
+httpx = "0.27.0"
+fastapi = "^0.110"
+uvicorn = "^0.29"
+
+[tool.poetry.dev-dependencies]
+pytest = "^8.0"
+fastapi = "^0.110"
+uvicorn = { extras = ["standard"], version = "^0.29" }
+pytest-asyncio = "^0.23.0"
