@@ -1,0 +1,10 @@
+[project]
+name = "fastapi-rbac"
+version = "0.1.0"
+description = "Modern, pluggable RBAC library for FastAPI and multi-tenant SaaS"
+authors = [{ name = "Ramanuj P", email = "ramanuj.p7@gmail.com" }]
+license = "MIT"
+dependencies = []
+
+[tool.setuptools]
+packages = ["rbac"]
