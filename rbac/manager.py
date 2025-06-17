@@ -1,12 +1,15 @@
 import logging
 from rbac.models import User, Role, Permission
 from rbac.storage import AbstractStorage
+from rbac.ssd.base import AbstractSSDConstraint
+from rbac.ssd.memory import InMemorySSDConstraint
 
 logger = logging.getLogger(__name__)
 
 class RBACManager:
-    def __init__(self, storage: AbstractStorage):
+    def __init__(self, storage: AbstractStorage, ssd_constraint: AbstractSSDConstraint = None):
         self.storage = storage
+        self.ssd = ssd_constraint or InMemorySSDConstraint()
         logger.debug("RBACManager initialized with storage: %s", type(storage).__name__)
 
     def add_user(self, username: str) -> User:
@@ -18,13 +21,13 @@ class RBACManager:
         logger.info("Added user: %s", username)
         return user
 
-    def add_role(self, role_name: str) -> Role:
-        if self.storage.get_role(role_name):
-            logger.warning("Attempt to add existing role: %s", role_name)
-            raise ValueError(f"Role '{role_name}' already exists.")
-        role = Role(role_name)
+    def add_role(self, role: Role) -> Role:
+        if self.storage.get_role(role.name):
+            logger.warning("Attempt to add existing role: %s", role.name)
+            raise ValueError(f"Role '{role.name}' already exists.")
         self.storage.save_role(role)
-        logger.info("Added role: %s", role_name)
+        logger.info("Added role: %s", role.name)
+        logger.debug(self.storage)
         return role
 
     def add_permission(self, perm_name: str) -> Permission:
@@ -45,7 +48,15 @@ class RBACManager:
         if not role:
             logger.error("Role not found: %s", role_name)
             raise ValueError(f"Role '{role_name}' not found.")
+
+        current_roles = user.get_role_names()
+
+        if self.ssd and not self.ssd.is_valid_assignment(username, role_name, current_roles):
+            raise ValueError(f"SSD violation: Cannot assign role '{role_name}' to '{username}'")
+
         user.add_role(role)
+        self.storage.save_user(user)
+
         logger.info("Assigned role '%s' to user '%s'", role_name, username)
 
     def grant_permission(self, role_name: str, perm_name: str) -> None:
@@ -72,3 +83,56 @@ class RBACManager:
         result = user.has_permission(permission)
         logger.debug("Permission check for user '%s' on '%s': %s", username, perm_name, result)
         return result
+
+    def user_has_permission(self, username: str, permission_name: str) -> bool:
+        logger.info("Checking permission for user '%s' on '%s'", username, permission_name)
+        user = self.storage.get_user(username)
+        if not user:
+            logger.error("User not found during permission check: %s", username)
+            return False
+
+        def has_permission(role: Role, path_stack: set[Role]) -> bool:
+            if role in path_stack:
+                logger.debug("Detected cycle in role inheritance for role '%s'", role.name)
+                return False  # Cycle detected in current path
+
+            path_stack.add(role)
+
+            # Check direct permissions
+            if any(p.name == permission_name for p in role.permissions):
+                return True
+
+            # Recurse into parents
+            for parent in role.parents:
+                if has_permission(parent, path_stack.copy()):
+                    return True
+
+            return False
+
+        for role in user.roles:
+            if has_permission(role, set()):
+                return True
+
+        return False
+
+
+    def get_user_permissions(self, username: str) -> set[str]:
+        user = self.storage.get_user(username)
+        permissions = set()
+
+        visited_roles = set()
+
+        def collect_permissions(role: Role):
+            if role.name in visited_roles:
+                return
+            visited_roles.add(role.name)
+            for perm in role.permissions:
+                permissions.add(perm.name)
+            for parent in role.parents:
+                collect_permissions(parent)
+
+        for role in user.roles:
+            collect_permissions(role)
+
+        return permissions
+

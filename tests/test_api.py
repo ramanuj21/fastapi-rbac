@@ -5,6 +5,9 @@ import pytest_asyncio
 
 from httpx import AsyncClient
 from rbac.api.main import app
+from rbac.models import User, Role, Permission
+from rbac.manager import RBACManager
+from rbac.storage.memory import InMemoryStorage
 
 
 @pytest.mark.asyncio
@@ -15,7 +18,7 @@ async def test_full_rbac_flow():
         assert resp.status_code == 200
 
         # Create a role
-        resp = await ac.post("/roles", json={"name": "teacher"})
+        resp = await ac.post("/rbac/roles", json={"name": "teacher"})
         assert resp.status_code == 200
 
         # Create a permission
@@ -38,4 +41,3 @@ async def test_full_rbac_flow():
         # Negative test: unassigned user
         resp = await ac.post("/check", json={"username": "bob", "permission": "edit_marks"})
         assert resp.status_code == 400  # bob doesn't exist
-
