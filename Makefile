@@ -1,16 +1,16 @@
-# Makefile
-
-.PHONY: build test clean
+.PHONY: build clean run test 
 
 build:
 	docker build -t rbac-app .
 
-test:
-	docker run --rm rbac-app pytest
+clean:
+	docker rmi rbac-app || true
 
 run:
 	docker run -p 9000:8000 rbac-app
 	echo "http://localhost:9000/docs"
 
-clean:
-	docker rmi rbac-app || true
+test:
+	docker run --rm -v $(PWD)/htmlcov:/app/htmlcov rbac-app pytest --cov=rbac --cov-report=term-missing --cov-report=html
+
+

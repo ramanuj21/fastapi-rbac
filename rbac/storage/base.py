@@ -13,11 +13,19 @@ class AbstractStorage(ABC):
         pass
 
     @abstractmethod
+    def get_all_users(self) -> list[User]:
+        pass
+
+    @abstractmethod
     def save_role(self, role: Role) -> None:
         pass
 
     @abstractmethod
     def get_role(self, name: str) -> Role | None:
+        pass
+
+    @abstractmethod
+    def get_all_roles(self) -> list[Role]:
         pass
 
     @abstractmethod
