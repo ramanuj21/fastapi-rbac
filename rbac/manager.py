@@ -1,15 +1,19 @@
 import logging
+from rbac.dsd.memory import InMemoryDSDConstraint
 from rbac.models import User, Role, Permission
 from rbac.storage import AbstractStorage
 from rbac.ssd.base import AbstractSSDConstraint
 from rbac.ssd.memory import InMemorySSDConstraint
+from rbac.dsd.base import DSDConstraint
+from rbac.models import Session
 
 logger = logging.getLogger(__name__)
 
 class RBACManager:
-    def __init__(self, storage: AbstractStorage, ssd_constraint: AbstractSSDConstraint = None):
+    def __init__(self, storage: AbstractStorage, ssd_constraint: AbstractSSDConstraint = None, dsd_constraint: DSDConstraint = None):
         self.storage = storage
         self.ssd = ssd_constraint or InMemorySSDConstraint()
+        self.dsd = dsd_constraint or InMemoryDSDConstraint()
         logger.debug("RBACManager initialized with storage: %s", type(storage).__name__)
 
     def add_user(self, username: str) -> User:
@@ -136,3 +140,16 @@ class RBACManager:
 
         return permissions
 
+    def create_session(self, username: str, active_role_names: set[str]) -> Session:
+        user = self.storage.get_user(username)
+        if not user:
+            raise ValueError(f"User '{username}' not found.")
+
+        assigned_roles = user.get_role_names()
+        if not active_role_names <= assigned_roles:
+            raise ValueError("Trying to activate roles not assigned to the user.")
+
+        if self.dsd and not self.dsd.is_valid_activation(active_role_names):
+            raise ValueError(f"DSD violation: Conflicting roles activated together.")
+
+        return Session(user=user, active_roles=set(active_role_names))

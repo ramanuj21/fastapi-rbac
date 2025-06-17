@@ -4,6 +4,7 @@ from pydantic import BaseModel
 from rbac.manager import RBACManager
 from rbac.storage import InMemoryStorage
 from rbac.models import Role, Permission
+from rbac.api.schemas import SessionCreateRequest, SessionResponse, DSDConflictSetRequest, DSDConflictSetUpdateRequest, DSDConflictSetsResponse
 
 
 app = FastAPI(title="RBAC Demo API")
@@ -159,4 +160,40 @@ def delete_ssd_set(name: str):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return {"msg": f"SSD set '{name}' deleted."}
+
+@app.post("/session", response_model=SessionResponse)
+def create_session(request: SessionCreateRequest):
+    try:
+        session = rbac.create_session(request.username, request.active_roles)
+        return SessionResponse(username=session.user.username, active_roles=session.active_roles)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.get("/dsd", response_model=DSDConflictSetsResponse)
+def get_dsd_conflict_sets():
+    if not hasattr(rbac, "dsd") or rbac.dsd is None:
+        return {"conflict_sets": {}}
+    return {"conflict_sets": rbac.dsd.get_conflict_sets()}
+
+@app.post("/dsd", status_code=201)
+def add_dsd_conflict_set(req: DSDConflictSetRequest):
+    if not hasattr(rbac, "dsd") or rbac.dsd is None:
+        raise HTTPException(status_code=400, detail="DSD system not configured.")
+    rbac.dsd.add_set(req.name, req.roles)
+    return {"message": f"Conflict set '{req.name}' added."}
+
+@app.put("/dsd/{set_name}")
+def update_dsd_conflict_set(set_name: str, req: DSDConflictSetUpdateRequest):
+    if not hasattr(rbac, "dsd") or rbac.dsd is None:
+        raise HTTPException(status_code=400, detail="DSD system not configured.")
+    rbac.dsd.remove_set(set_name)
+    rbac.dsd.add_set(set_name, req.roles)
+    return {"message": f"Conflict set '{set_name}' updated."}
+
+@app.delete("/dsd/{set_name}")
+def delete_dsd_conflict_set(set_name: str):
+    if not hasattr(rbac, "dsd") or rbac.dsd is None:
+        raise HTTPException(status_code=400, detail="DSD system not configured.")
+    rbac.dsd.remove_set(set_name)
+    return {"message": f"Conflict set '{set_name}' removed."}
 

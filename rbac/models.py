@@ -93,22 +93,13 @@ class User:
 
 class Session:
     """Optional session model to activate a subset of roles."""
-    def __init__(self, user: User):
+    def __init__(self, user: User, active_roles: set[str]):
         self.user = user
-        self.active_roles: Set[Role] = set()
+        self.active_roles: set[str] = active_roles or set()
 
-    def activate_role(self, role: Role) -> None:
+    def activate_role(self, role: str) -> None:
         if role in self.user.roles:
             self.active_roles.add(role)
-
-    def get_active_permissions(self) -> Set[Permission]:
-        perms = set()
-        for role in self.active_roles:
-            perms |= role.get_all_permissions()
-        return perms
-
-    def has_permission(self, permission: Permission) -> bool:
-        return permission in self.get_active_permissions()
 
     def __repr__(self) -> str:
         return f"Session(user={self.user.username!r})"
