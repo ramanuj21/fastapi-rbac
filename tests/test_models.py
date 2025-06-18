@@ -148,3 +148,15 @@ def test_user_roles_and_string_representation():
 
     assert role in user.roles
     assert "admin_user" in str(user)
+
+
+def test_role_repr_and_hash():
+    role = Role(name="admin")
+    assert repr(role) == "Role('admin')"
+    assert hash(role) == hash("admin")
+
+def test_permission_repr_and_hash():
+    perm = Permission(name="read")
+    assert repr(perm) == "Permission('read')"
+    assert hash(perm) == hash("read")
+
