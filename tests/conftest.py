@@ -2,7 +2,7 @@
 
 import pytest
 import logging
-from rbac.manager import RBACManager
+from rbac.core.manager import RBACManager
 from rbac.storage import InMemoryStorage
 
 # Configure logging for all tests

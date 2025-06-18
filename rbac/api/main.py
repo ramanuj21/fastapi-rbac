@@ -1,199 +1,164 @@
-# rbac/api/main.py
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
-from rbac.manager import RBACManager
-from rbac.storage import InMemoryStorage
-from rbac.models import Role, Permission
-from rbac.api.schemas import SessionCreateRequest, SessionResponse, DSDConflictSetRequest, DSDConflictSetUpdateRequest, DSDConflictSetsResponse
+from fastapi import APIRouter, HTTPException
+from rbac.core import RBACManager
+from rbac.storage import get_storage
 
+# Schemas
+from rbac.schemas.users import UserCreate, AssignRole, GetUserRolesResponse, RemoveUserRoleResponse
+from rbac.schemas.roles import RoleCreateRequest, RoleListResponse, GrantPermission
+from rbac.schemas.permissions import PermissionCreate, PermissionListResponse, CheckAccess, PermissionCheckRequest
+from rbac.schemas.session import SessionCreateRequest, SessionResponse
+from rbac.schemas.ssd import SSDCreateRequest, SSDListResponse
+from rbac.schemas.dsd import DSDConflictSetRequest, DSDConflictSetUpdateRequest, DSDConflictSetsResponse
 
-app = FastAPI(title="RBAC Demo API")
-rbac = RBACManager(InMemoryStorage())
+router = APIRouter()
+rbac = RBACManager(storage=get_storage())
 
-# Request Schemas
-class UserCreate(BaseModel):
-    username: str
+# --- User Management ---
 
-class RoleCreateRequest(BaseModel):
-    permissions: list[str] = []
-    parents: list[str] = []
-    name: str
-
-class PermissionCreate(BaseModel):
-    name: str
-
-class AssignRole(BaseModel):
-    username: str
-    role: str
-
-class GrantPermission(BaseModel):
-    role: str
-    permission: str
-
-class CheckAccess(BaseModel):
-    username: str
-    permission: str
-
-# Request schema
-class PermissionCheckRequest(BaseModel):
-    username: str
-    permission: str
-
-class SSDConflictSet(BaseModel):
-    name: str
-    roles: set[str]
-
-class SSDCreateRequest(BaseModel):
-    conflict_sets: list[SSDConflictSet]
-
-@app.post("/rbac/has_permission", tags=["RBAC"])
-def check_permission_h(data: PermissionCheckRequest):
-    try:
-        result = rbac.user_has_permission(data.username, data.permission)
-        return {"username": data.username, "permission": data.permission, "has_permission": result}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.post("/users")
+@router.post("/users", summary="Create a new user", tags=["Users"])
 def create_user(payload: UserCreate):
-    try:
-        user = rbac.add_user(payload.username)
-        return {"msg": "User created", "username": user.username}
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-@app.post("/rbac/roles", tags=["RBAC"])
-def create_role(data: RoleCreateRequest):
-    role = Role(data.name)
-    for perm in data.permissions:
-        role.add_permission(Permission(perm))
-
-    for parent_name in data.parents:
-        print(rbac.storage.__dict__)
-        parent_role = rbac.storage.get_role(parent_name)
-        if not parent_role:
-            raise HTTPException(status_code=400, detail=f"Parent role {parent_name} not found")
-        role.add_parent(parent_role)
-
-    rbac.add_role(role)
-    return {"role": role.name, "permissions": data.permissions, "parents": data.parents}
+    """Creates a new user."""
+    return rbac.add_user(payload.username)
 
 
-@app.post("/permissions")
-def create_permission(payload: PermissionCreate):
-    try:
-        perm = rbac.add_permission(payload.name)
-        return {"msg": "Permission created", "permission": perm.name}
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-@app.post("/assign-role")
-def assign_role(payload: AssignRole):
-    try:
-        rbac.assign_role(payload.username, payload.role)
-        return {"msg": f"Role '{payload.role}' assigned to user '{payload.username}'"}
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-@app.post("/grant-permission")
-def grant_permission(payload: GrantPermission):
-    try:
-        rbac.grant_permission(payload.role, payload.permission)
-        return {"msg": f"Permission '{payload.permission}' granted to role '{payload.role}'"}
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-@app.post("/check")
-def check_permission(payload: CheckAccess):
-    try:
-        has_access = rbac.check_permission(payload.username, payload.permission)
-        return {"access": has_access}
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-@app.get("/users")
+@router.get("/users", response_model=list[str], summary="List all users", tags=["Users"])
 def list_users():
+    """Lists all registered users."""
     return [user.username for user in rbac.storage.get_all_users()]
 
-@app.get("/users/{username}/roles")
-def get_user_roles(username: str):
-    user = rbac.storage.get_user(username)
-    return list(user.get_role_names())
 
-@app.delete("/users/{username}/roles/{role}")
-def remove_role_from_user(username: str, role: str):
+@router.get("/users/{username}/roles", response_model=GetUserRolesResponse, tags=["Users"])
+def get_user_roles(username: str):
+    """Gets roles assigned to a user."""
     user = rbac.storage.get_user(username)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    return {"username": username, "roles": list(user.get_role_names())}
+
+
+@router.delete("/users/{username}/roles/{role}", response_model=RemoveUserRoleResponse, tags=["Users"])
+def remove_role_from_user(username: str, role: str):
+    """Removes a role from a user."""
+    user = rbac.storage.get_user(username)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
     user.roles = {r for r in user.roles if r.name != role}
     rbac.storage.save_user(user)
-    return {"msg": f"Role '{role}' removed from user '{username}'"}
+    return {"username": username, "removed_role": role}
 
-@app.get("/roles")
+# --- Role Management ---
+
+@router.post("/roles", summary="Create a new role", tags=["Roles"])
+def create_role(data: RoleCreateRequest):
+    """Creates a new role."""
+    return rbac.add_role(data.to_role())
+
+
+@router.get("/roles", response_model=RoleListResponse, tags=["Roles"])
 def list_roles():
-    return list(rbac.storage.roles.keys())
+    """Lists all roles."""
+    return {"roles": list(rbac.storage.get_all_role_names())}
 
-@app.get("/permissions")
+
+@router.post("/assign-role", summary="Assign role to user", tags=["Roles"])
+def assign_role(payload: AssignRole):
+    """Assigns a role to a user."""
+    rbac.assign_role(payload.username, payload.role)
+    return {"status": "success"}
+
+
+@router.post("/grant-permission", summary="Grant permission to a role", tags=["Roles"])
+def grant_permission(payload: GrantPermission):
+    """Grants a permission to a role."""
+    rbac.grant_permission(payload.role, payload.permission)
+    return {"status": "success"}
+
+# --- Permission Management ---
+
+@router.post("/permissions", summary="Create a new permission", tags=["Permissions"])
+def create_permission(payload: PermissionCreate):
+    """Creates a new permission."""
+    return rbac.add_permission(payload.name)
+
+
+@router.get("/permissions", response_model=PermissionListResponse, tags=["Permissions"])
 def list_permissions():
-    return list(rbac.storage.permissions.keys())
+    """Lists all permissions."""
+    return {"permissions": list(rbac.storage.get_all_permission_names())}
 
-@app.get("/users/{username}/permissions")
+
+@router.post("/check-permission", summary="Check user access", tags=["Permissions"])
+def check_permission(payload: CheckAccess):
+    """Checks if the user has a given permission."""
+    try:
+        result = rbac.check_permission(payload.username, payload.permission)
+        return {"has_permission": result}
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+@router.post("/check-permission-h", summary="Check user access (Hierarchical)", tags=["Permissions"])
+def check_permission_h(data: PermissionCheckRequest):
+    """Checks if user has a permission (hierarchical version)."""
+    return {"has_permission": rbac.check_permission(data.username, data.permission)}
+
+@router.get("/users/{username}/permissions", response_model=list[str], tags=["Permissions"])
 def get_effective_permissions(username: str):
+    """Lists all effective permissions for a user."""
     return list(rbac.get_user_permissions(username))
 
-@app.get("/ssd")
+# --- SSD ---
+
+@router.get("/ssd", response_model=SSDListResponse, tags=["SSD"])
 def get_ssd_sets():
-    return rbac.ssd.get_all_sets()  # returns {name: [roles...]}
+    """Retrieves all SSD (Static Separation of Duty) sets."""
+    return {"sets": rbac.ssd.get_all_sets()}
 
-@app.post("/ssd")
+
+@router.post("/ssd", summary="Create SSD conflict set", tags=["SSD"])
 def create_ssd_conflicts(request: SSDCreateRequest):
-    try:
-        # Convert list of SSDConflictSet to internal format
-        conflict_dict = {rbac.ssd.add_set(conf.name, conf.roles) for conf in request.conflict_sets}
-        return {"status": "success", "conflict_sets": conflict_dict}
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    """Creates a new SSD conflict set."""
+    rbac.ssd.add_set(request.name, set(request.roles))
+    return {"status": "created"}
 
-@app.delete("/ssd/{name}")
+
+@router.delete("/ssd/{name}", summary="Delete SSD conflict set", tags=["SSD"])
 def delete_ssd_set(name: str):
-    try:
-        rbac.ssd.remove_set(name)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    return {"msg": f"SSD set '{name}' deleted."}
+    """Deletes an SSD conflict set by name."""
+    rbac.ssd.remove_set(name)
+    return {"status": "deleted"}
 
-@app.post("/session", response_model=SessionResponse)
-def create_session(request: SessionCreateRequest):
-    try:
-        session = rbac.create_session(request.username, request.active_roles)
-        return SessionResponse(username=session.user.username, active_roles=session.active_roles)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+# --- DSD ---
 
-@app.get("/dsd", response_model=DSDConflictSetsResponse)
+@router.get("/dsd", response_model=DSDConflictSetsResponse, tags=["DSD"])
 def get_dsd_conflict_sets():
-    if not hasattr(rbac, "dsd") or rbac.dsd is None:
-        return {"conflict_sets": {}}
+    """Retrieves all DSD (Dynamic Separation of Duty) conflict sets."""
     return {"conflict_sets": rbac.dsd.get_conflict_sets()}
 
-@app.post("/dsd", status_code=201)
+
+@router.post("/dsd", summary="Add new DSD conflict set", tags=["DSD"])
 def add_dsd_conflict_set(req: DSDConflictSetRequest):
-    if not hasattr(rbac, "dsd") or rbac.dsd is None:
-        raise HTTPException(status_code=400, detail="DSD system not configured.")
+    """Adds a new DSD conflict set."""
     rbac.dsd.add_set(req.name, req.roles)
-    return {"message": f"Conflict set '{req.name}' added."}
+    return {"status": "created"}
 
-@app.put("/dsd/{set_name}")
+
+@router.put("/dsd/{set_name}", summary="Update DSD conflict set", tags=["DSD"])
 def update_dsd_conflict_set(set_name: str, req: DSDConflictSetUpdateRequest):
-    if not hasattr(rbac, "dsd") or rbac.dsd is None:
-        raise HTTPException(status_code=400, detail="DSD system not configured.")
-    rbac.dsd.remove_set(set_name)
+    """Updates an existing DSD conflict set."""
     rbac.dsd.add_set(set_name, req.roles)
-    return {"message": f"Conflict set '{set_name}' updated."}
+    return {"status": "updated"}
 
-@app.delete("/dsd/{set_name}")
+
+@router.delete("/dsd/{set_name}", summary="Delete DSD conflict set", tags=["DSD"])
 def delete_dsd_conflict_set(set_name: str):
-    if not hasattr(rbac, "dsd") or rbac.dsd is None:
-        raise HTTPException(status_code=400, detail="DSD system not configured.")
+    """Deletes a DSD conflict set."""
     rbac.dsd.remove_set(set_name)
-    return {"message": f"Conflict set '{set_name}' removed."}
+    return {"status": "deleted"}
 
+# --- Session ---
+
+@router.post("/sessions", response_model=SessionResponse, tags=["Sessions"])
+def create_session(request: SessionCreateRequest):
+    """Creates a user session with selected active roles."""
+    session = rbac.create_session(request.username, request.active_roles)
+    return SessionResponse(username=session.user.username, active_roles=session.active_roles)
